@@ -33,10 +33,8 @@ export class FirehoseSubscription {
 	constructor(protected opts: FirehoseSubscriptionOptions) {
 		if (this.opts.minWorkers) this.settings.minWorkers = this.opts.minWorkers;
 		if (this.opts.maxWorkers) this.settings.maxWorkers = this.opts.maxWorkers;
-		if (this.opts.maxConcurrency) {
-			this.settings.maxConcurrency = this.opts.maxConcurrency;
-		}
-		if (this.opts.statsFrequencyMs) {
+		if (this.opts.maxConcurrency) this.settings.maxConcurrency = this.opts.maxConcurrency;
+		if (this.opts.statsFrequencyMs !== undefined) {
 			this.settings.statsFrequencyMs = this.opts.statsFrequencyMs;
 		}
 
@@ -107,7 +105,7 @@ export class FirehoseSubscription {
 
 		this.firehose.onerror = (e) => this.opts.onError?.(new FirehoseSubscriptionError(e.error));
 
-		if (!this.logStatsInterval) {
+		if (!this.logStatsInterval && this.settings.statsFrequencyMs) {
 			const secFreq = this.settings.statsFrequencyMs / 1000;
 			this.logStatsInterval = setInterval(() => {
 				console.log(
@@ -160,7 +158,6 @@ export interface FirehoseSubscriptionOptions {
 	maxConcurrency?: number;
 	onError?: (err: Error) => void;
 	cursor?: number;
-	verbose?: boolean;
 	statsFrequencyMs?: number;
 }
 

@@ -23,9 +23,9 @@ const main = async (): Promise<void> => {
 		redisOptions: env.redisUrl ? { url: env.redisUrl } : undefined,
 		minWorkers: env.minWorkers,
 		maxWorkers: env.maxWorkers,
-		onError: (err) => console.error(...(err.cause ? [err.message, err.cause] : [err])),
-		verbose: env.verbose,
+		maxConcurrency: env.maxConcurrency,
 		statsFrequencyMs: env.statsFrequencyMs,
+		onError: (err) => console.error(...(err.cause ? [err.message, err.cause] : [err])),
 	});
 
 	void sub.start().catch(console.error);
@@ -43,7 +43,9 @@ const getEnv = () => ({
 	poolSize: process.env.BSKY_DB_POOL_SIZE ? parseInt(process.env.BSKY_DB_POOL_SIZE) : undefined,
 	minWorkers: process.env.SUB_MIN_WORKERS ? parseInt(process.env.SUB_MIN_WORKERS) : undefined,
 	maxWorkers: process.env.SUB_MAX_WORKERS ? parseInt(process.env.SUB_MAX_WORKERS) : undefined,
-	verbose: process.env.LOG_VERBOSE === "true",
+	maxConcurrency: process.env.SUB_MAX_WORKER_CONCURRENCY
+		? parseInt(process.env.SUB_MAX_WORKER_CONCURRENCY)
+		: undefined,
 	statsFrequencyMs: process.env.STATS_FREQUENCY_MS
 		? parseInt(process.env.STATS_FREQUENCY_MS)
 		: undefined,
