@@ -1,4 +1,3 @@
-import { workerData } from "node:worker_threads";
 import { readCar as iterateCar } from "@atcute/car";
 import { decode, decodeFirst, fromBytes, toCidLink } from "@atcute/cbor";
 import type { ComAtprotoSyncSubscribeRepos } from "@atcute/atproto";
@@ -11,6 +10,8 @@ import { BlobRef } from "@atproto/lexicon";
 import { WriteOpAction } from "@atproto/repo";
 import { AtUri } from "@atproto/syntax";
 import type { FirehoseSubscriptionOptions } from "./subscription.ts";
+
+declare const workerData: WorkerData;
 
 if (!workerData) {
 	throw new Error("must be run as a worker");
@@ -31,7 +32,7 @@ export type WorkerOutput = {
 	error?: unknown;
 };
 
-const { dbOptions, idResolverOptions } = workerData as WorkerData;
+const { dbOptions, idResolverOptions } = workerData;
 if (!dbOptions || !idResolverOptions) {
 	throw new Error("worker missing options");
 }

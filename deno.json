@@ -13,16 +13,13 @@
 		"@atproto/lexicon": "npm:@atproto/lexicon@^0.4.11",
 		"@atproto/repo": "npm:@atproto/repo@^0.8.1",
 		"@atproto/syntax": "npm:@atproto/syntax@^0.4.0",
-		"@atproto/xrpc-server": "npm:@atproto/xrpc-server@^0.7.18",
 		"@poolifier/poolifier-web-worker": "jsr:@poolifier/poolifier-web-worker@^0.4.31",
 		"@redis/client": "npm:@redis/client@^1.6.0",
-		"@skyware/firehose": "npm:@skyware/firehose@^0.5.1",
 		"multiformats": "npm:multiformats@9.9.0",
-		"partysocket": "npm:partysocket@^1.1.4",
-		"typescript": "npm:typescript@^5.8.3"
+		"partysocket": "npm:partysocket@^1.1.4"
 	},
 	"tasks": {
-		"start": "deno run --allow-all --inspect-brk src/bin.ts"
+		"start": "deno run --allow-all src/bin.ts"
 	},
 	"unstable": ["net", "worker-options"]
 }
