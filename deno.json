@@ -1,9 +1,8 @@
 {
-	"fmt": {
-		"useTabs": true,
-		"useBraces": "whenNotSingleLine",
-		"lineWidth": 100
-	},
+	"name": "@futur/bsky-indexer",
+	"version": "0.1.0",
+	"license": "MPL-2.0",
+	"exports": "./src/index.ts",
 	"imports": {
 		"@atcute/atproto": "npm:@atcute/atproto@^3.0.1",
 		"@atcute/car": "npm:@atcute/car@^3.0.3",
@@ -20,6 +19,11 @@
 	},
 	"tasks": {
 		"start": "deno run --allow-all src/bin.ts"
+	},
+	"fmt": {
+		"useTabs": true,
+		"useBraces": "whenNotSingleLine",
+		"lineWidth": 100
 	},
 	"unstable": ["net", "worker-options"]
 }

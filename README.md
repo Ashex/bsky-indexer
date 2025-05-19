@@ -4,7 +4,6 @@ A service to ingest data from an atproto relay into the Bluesky AppView.
 
 ## Environment Variables
 
-
 ### Required
 
 - `BSKY_DB_POSTGRES_URL`: The URL of the Postgres database to connect to.

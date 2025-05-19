@@ -9,7 +9,7 @@ import { IdResolver, MemoryCache } from "@atproto/identity";
 import { BlobRef } from "@atproto/lexicon";
 import { WriteOpAction } from "@atproto/repo";
 import { AtUri } from "@atproto/syntax";
-import type { FirehoseSubscriptionOptions } from "./subscription.ts";
+import type { Event, FirehoseSubscriptionOptions, RepoOp } from "./subscription.ts";
 
 declare const workerData: WorkerData;
 
@@ -334,46 +334,5 @@ function jsonToLex(val: Record<string, unknown>): unknown {
 	}
 	return val;
 }
-
-type RepoOp =
-	| {
-		action: "create" | "update";
-		path: string;
-		cid: string;
-		record: {};
-	}
-	| { action: "delete"; path: string };
-
-type Event =
-	| {
-		$type: "com.atproto.sync.subscribeRepos#identity";
-		did: string;
-		seq: number;
-		time: string;
-	}
-	| {
-		$type: "com.atproto.sync.subscribeRepos#account";
-		did: string;
-		seq: number;
-		active: boolean;
-		status?: string;
-	}
-	| {
-		$type: "com.atproto.sync.subscribeRepos#sync";
-		did: string;
-		seq: number;
-		blocks: Uint8Array;
-		rev: string;
-		time: string;
-	}
-	| {
-		$type: "com.atproto.sync.subscribeRepos#commit";
-		did: string;
-		seq: number;
-		commit: string;
-		rev: string;
-		time: string;
-		ops: Array<RepoOp>;
-	};
 
 export default new Worker();

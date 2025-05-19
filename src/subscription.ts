@@ -13,7 +13,6 @@ let messagesReceived = 0,
 
 export class FirehoseSubscription {
 	private REDIS_SEQ_KEY = "bsky_indexer:seq";
-	private WORKER_PATH = new URL("./worker.ts", import.meta.url);
 
 	protected firehose!: WebSocket;
 	protected pool: DynamicThreadPool<WorkerInput, WorkerOutput>;
@@ -23,14 +22,17 @@ export class FirehoseSubscription {
 	protected logStatsInterval: number | null = null;
 	protected saveCursorInterval: number | null = null;
 
-	protected settings = {
+	protected settings: FirehoseSubscriptionSettings = {
 		minWorkers: clamp(availableParallelism() / 2, 16, 32),
 		maxWorkers: clamp(availableParallelism() * 2, 32, 64),
 		maxConcurrency: 75,
 		statsFrequencyMs: 30_000,
 	};
 
-	constructor(protected opts: FirehoseSubscriptionOptions) {
+	constructor(
+		protected opts: FirehoseSubscriptionOptions,
+		workerPath: string | URL = new URL("./worker.ts", import.meta.url),
+	) {
 		if (this.opts.minWorkers) this.settings.minWorkers = this.opts.minWorkers;
 		if (this.opts.maxWorkers) this.settings.maxWorkers = this.opts.maxWorkers;
 		if (this.opts.maxConcurrency) this.settings.maxConcurrency = this.opts.maxConcurrency;
@@ -40,7 +42,7 @@ export class FirehoseSubscription {
 
 		const { dbOptions, idResolverOptions } = this.opts;
 		// hack to get options into the worker
-		const workerTs = readFileSync(this.WORKER_PATH);
+		const workerTs = readFileSync(workerPath);
 		const workerBlob = new Blob(
 			[
 				`const workerData = ${JSON.stringify({ dbOptions, idResolverOptions })};\n`,
@@ -89,21 +91,7 @@ export class FirehoseSubscription {
 			this.cursor = this.opts.cursor.toString();
 		} else console.log(`starting from latest`);
 
-		this.firehose = new WebSocket(
-			() => `${this.opts.service}/xrpc/com.atproto.sync.subscribeRepos?cursor=${this.cursor}`,
-		);
-		this.firehose.binaryType = "arraybuffer";
-
-		this.firehose.onmessage = ({ data }: { data: ArrayBuffer }) => {
-			const chunk = new Uint8Array(data);
-			messagesReceived++;
-			void this.pool
-				.execute({ chunk }, undefined, [chunk.buffer])
-				.then(this.onProcessed)
-				.catch((e: unknown) => this.opts.onError?.(new FirehoseSubscriptionError(e)));
-		};
-
-		this.firehose.onerror = (e) => this.opts.onError?.(new FirehoseSubscriptionError(e.error));
+		this.initFirehose();
 
 		if (!this.logStatsInterval && this.settings.statsFrequencyMs) {
 			const secFreq = this.settings.statsFrequencyMs / 1000;
@@ -130,7 +118,28 @@ export class FirehoseSubscription {
 		}
 	}
 
-	protected onProcessed = (res: WorkerOutput) => {
+	protected initFirehose(): void {
+		this.firehose = new WebSocket(
+			() => `${this.opts.service}/xrpc/com.atproto.sync.subscribeRepos?cursor=${this.cursor}`,
+		);
+		this.firehose.binaryType = "arraybuffer";
+		this.firehose.onmessage = this.onMessage;
+		this.firehose.onerror = (e) => this.opts.onError?.(new FirehoseSubscriptionError(e.error));
+	}
+
+	protected onMessage = async (e: MessageEvent<ArrayBuffer>): Promise<void> => {
+		const chunk = new Uint8Array(e.data);
+		messagesReceived++;
+		try {
+			const res = await this.pool
+				.execute({ chunk }, undefined, [chunk.buffer]);
+			this.onProcessed(res);
+		} catch (e) {
+			this.opts.onError?.(new FirehoseSubscriptionError(e));
+		}
+	};
+
+	protected onProcessed = (res: WorkerOutput): void => {
 		if (res?.success) {
 			messagesProcessed++;
 		} else if (res?.error) {
@@ -141,25 +150,69 @@ export class FirehoseSubscription {
 		}
 	};
 
-	async destroy() {
+	async destroy(): Promise<void> {
 		console.warn("destroying indexer");
 		await this?.pool?.destroy();
 		await this?.redis?.quit();
 	}
 }
 
-export interface FirehoseSubscriptionOptions {
+export interface FirehoseSubscriptionSettings {
+	minWorkers: number;
+	maxWorkers: number;
+	maxConcurrency: number;
+	statsFrequencyMs: number;
+}
+
+export interface FirehoseSubscriptionOptions extends Partial<FirehoseSubscriptionSettings> {
 	service: string;
 	dbOptions: PgOptions;
 	redisOptions?: RedisClientOptions;
 	idResolverOptions?: IdentityResolverOpts;
-	minWorkers?: number | undefined;
-	maxWorkers?: number | undefined;
-	maxConcurrency?: number;
 	onError?: (err: Error) => void;
 	cursor?: number;
-	statsFrequencyMs?: number;
 }
+
+export type RepoOp =
+	| {
+		action: "create" | "update";
+		path: string;
+		cid: string;
+		record: {};
+	}
+	| { action: "delete"; path: string };
+
+export type Event =
+	| {
+		$type: "com.atproto.sync.subscribeRepos#identity";
+		did: string;
+		seq: number;
+		time: string;
+	}
+	| {
+		$type: "com.atproto.sync.subscribeRepos#account";
+		did: string;
+		seq: number;
+		active: boolean;
+		status?: string;
+	}
+	| {
+		$type: "com.atproto.sync.subscribeRepos#sync";
+		did: string;
+		seq: number;
+		blocks: Uint8Array;
+		rev: string;
+		time: string;
+	}
+	| {
+		$type: "com.atproto.sync.subscribeRepos#commit";
+		did: string;
+		seq: number;
+		commit: string;
+		rev: string;
+		time: string;
+		ops: Array<RepoOp>;
+	};
 
 function clamp(value: number, min: number, max: number): number {
 	if (value < min) return min;
