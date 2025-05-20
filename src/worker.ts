@@ -313,6 +313,9 @@ export function jsonToLex(val: Record<string, unknown>): unknown {
 			if ("bytes" in val && val["bytes"] instanceof Uint8Array) {
 				return CID.decode(val.bytes);
 			}
+			if ("$bytes" in val && typeof val["$bytes"] === "string" && Object.keys(val).length === 1) {
+				return fromBytes({ $bytes: val.$bytes });
+			}
 			if (
 				val["$type"] === "blob" ||
 				(typeof val["cid"] === "string" && typeof val["mimeType"] === "string")
