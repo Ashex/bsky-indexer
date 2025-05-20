@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
+import { URL } from "node:url";
+import { Blob } from "node:buffer";
 import { createClient, type RedisClientOptions } from "@redis/client";
 import { WebSocket } from "partysocket";
 import { DynamicThreadPool } from "@poolifier/poolifier-web-worker";
@@ -33,7 +35,7 @@ export class FirehoseSubscription {
 
 	constructor(
 		protected opts: FirehoseSubscriptionOptions,
-		workerPath: URL = DEFAULT_WORKER_URL,
+		worker: URL | Blob = DEFAULT_WORKER_URL,
 	) {
 		if (this.opts.minWorkers) this.settings.minWorkers = this.opts.minWorkers;
 		if (this.opts.maxWorkers) this.settings.maxWorkers = this.opts.maxWorkers;
@@ -44,11 +46,12 @@ export class FirehoseSubscription {
 
 		const { dbOptions, idResolverOptions } = this.opts;
 		// hack to get options into the worker
-		const workerBlob = new Blob(
+		const workerBlob = worker instanceof Blob ? worker : new Blob(
 			[
-				`const workerData = ${JSON.stringify({ dbOptions, idResolverOptions })};\n`,
-				readFileSync(workerPath),
-				workerPath === DEFAULT_WORKER_URL ? `\nexport default new Worker();` : "",
+				readFileSync(worker),
+				worker === DEFAULT_WORKER_URL
+					? `\nexport default new Worker(${JSON.stringify({ dbOptions, idResolverOptions })});`
+					: "",
 			],
 			{ type: "application/typescript" },
 		);

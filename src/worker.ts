@@ -11,9 +11,7 @@ import { WriteOpAction } from "@atproto/repo";
 import { AtUri } from "@atproto/syntax";
 import type { Event, FirehoseSubscriptionOptions, RepoOp } from "./subscription.ts";
 
-declare const workerData: WorkerData;
-
-type WorkerData = Pick<
+export type WorkerData = Pick<
 	FirehoseSubscriptionOptions,
 	"dbOptions" | "idResolverOptions"
 >;
@@ -28,13 +26,13 @@ export type WorkerOutput = {
 	error?: unknown;
 };
 
-export class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
+class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
 	db: Database;
 	idResolver: IdResolver;
 	background: BackgroundQueue;
 	indexingSvc: IndexingService;
 
-	constructor() {
+	constructor(workerData: WorkerData) {
 		// must be async; poolifier uses that to determine whether to await
 		super(async (data: WorkerInput | undefined) => this.process(data!), {
 			maxInactiveTime: 60_000,
@@ -348,3 +346,5 @@ export function jsonToLex(val: Record<string, unknown>): unknown {
 	}
 	return val;
 }
+
+export { Worker as IndexerWorker };
