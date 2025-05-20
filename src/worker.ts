@@ -13,10 +13,6 @@ import type { Event, FirehoseSubscriptionOptions, RepoOp } from "./subscription.
 
 declare const workerData: WorkerData;
 
-if (!workerData) {
-	throw new Error("must be run as a worker");
-}
-
 type WorkerData = Pick<
 	FirehoseSubscriptionOptions,
 	"dbOptions" | "idResolverOptions"
@@ -32,23 +28,38 @@ export type WorkerOutput = {
 	error?: unknown;
 };
 
-const { dbOptions, idResolverOptions } = workerData;
-if (!dbOptions || !idResolverOptions) {
-	throw new Error("worker missing options");
-}
-
-class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
-	db = new Database(dbOptions);
-	idResolver = new IdResolver({
-		...idResolverOptions,
-		didCache: new MemoryCache(),
-	});
-	background = new BackgroundQueue(this.db);
-	indexingSvc = new IndexingService(this.db, this.idResolver, this.background);
+export class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
+	db: Database;
+	idResolver: IdResolver;
+	background: BackgroundQueue;
+	indexingSvc: IndexingService;
 
 	constructor() {
 		// must be async; poolifier uses that to determine whether to await
-		super(async (data) => this.process(data!), { maxInactiveTime: 120_000 });
+		super(async (data: WorkerInput | undefined) => this.process(data!), {
+			maxInactiveTime: 60_000,
+		});
+
+		if (!workerData) {
+			throw new Error("must be run as a worker");
+		}
+
+		const { dbOptions, idResolverOptions } = workerData;
+		if (!dbOptions || !idResolverOptions) {
+			throw new Error("worker missing options");
+		}
+
+		this.db = new Database(dbOptions);
+		this.idResolver = new IdResolver({
+			...idResolverOptions,
+			didCache: new MemoryCache(),
+		});
+		this.background = new BackgroundQueue(this.db);
+		this.indexingSvc = new IndexingService(
+			this.db,
+			this.idResolver,
+			this.background,
+		);
 	}
 
 	process = async ({ chunk }: WorkerInput): Promise<WorkerOutput> => {
@@ -89,7 +100,7 @@ class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
 		};
 	}
 
-	async indexEvent(event: Event) {
+	async indexEvent(event: Event): Promise<{ success: boolean; error?: unknown }> {
 		if (!event) return { success: true };
 
 		try {
@@ -141,7 +152,7 @@ class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
 	}
 }
 
-function decodeChunk(chunk: Uint8Array): Event | undefined {
+export function decodeChunk(chunk: Uint8Array): Event | undefined {
 	const [header, remainder] = decodeFirst(chunk);
 	const [body, remainder2] = decodeFirst(remainder);
 	if (remainder2.length > 0) {
@@ -260,7 +271,7 @@ function parseHeader(header: any): { t: string; op: 1 | -1 } {
 	return { t: header.t, op: header.op };
 }
 
-function readCar(buffer: Uint8Array): Map<string, unknown> {
+export function readCar(buffer: Uint8Array): Map<string, unknown> {
 	const records = new Map<string, unknown>();
 	for (const { cid, bytes } of iterateCar(buffer).iterate()) {
 		records.set(toCidLink(cid).$link, decode(bytes));
@@ -268,9 +279,9 @@ function readCar(buffer: Uint8Array): Map<string, unknown> {
 	return records;
 }
 
-function parseCid(
+export function parseCid(
 	cid: { $link: string } | { bytes: Uint8Array } | CID | string,
-) {
+): CID {
 	if (cid instanceof CID) {
 		return cid;
 	} else if (typeof cid === "string") {
@@ -283,7 +294,7 @@ function parseCid(
 	throw new Error("invalid CID " + JSON.stringify(cid));
 }
 
-function jsonToLex(val: Record<string, unknown>): unknown {
+export function jsonToLex(val: Record<string, unknown>): unknown {
 	try {
 		// walk arrays
 		if (Array.isArray(val)) {
@@ -334,5 +345,3 @@ function jsonToLex(val: Record<string, unknown>): unknown {
 	}
 	return val;
 }
-
-export default new Worker();

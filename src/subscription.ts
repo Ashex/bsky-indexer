@@ -11,6 +11,8 @@ import type { WorkerInput, WorkerOutput } from "./worker.ts";
 let messagesReceived = 0,
 	messagesProcessed = 0;
 
+const DEFAULT_WORKER_URL = new URL("./worker.ts", import.meta.url);
+
 export class FirehoseSubscription {
 	private REDIS_SEQ_KEY = "bsky_indexer:seq";
 
@@ -31,7 +33,7 @@ export class FirehoseSubscription {
 
 	constructor(
 		protected opts: FirehoseSubscriptionOptions,
-		workerPath: string | URL = new URL("./worker.ts", import.meta.url),
+		workerPath: URL = DEFAULT_WORKER_URL,
 	) {
 		if (this.opts.minWorkers) this.settings.minWorkers = this.opts.minWorkers;
 		if (this.opts.maxWorkers) this.settings.maxWorkers = this.opts.maxWorkers;
@@ -42,11 +44,11 @@ export class FirehoseSubscription {
 
 		const { dbOptions, idResolverOptions } = this.opts;
 		// hack to get options into the worker
-		const workerTs = readFileSync(workerPath);
 		const workerBlob = new Blob(
 			[
 				`const workerData = ${JSON.stringify({ dbOptions, idResolverOptions })};\n`,
-				workerTs,
+				readFileSync(workerPath),
+				workerPath === DEFAULT_WORKER_URL ? `\nexport default new Worker();` : "",
 			],
 			{ type: "application/typescript" },
 		);
