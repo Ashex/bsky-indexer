@@ -1,11 +1,9 @@
-import { readFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { URL } from "node:url";
-import { Blob } from "node:buffer";
 import { createClient, type RedisClientOptions } from "@redis/client";
 import { WebSocket } from "partysocket";
 import { DynamicThreadPool } from "@poolifier/poolifier-web-worker";
-import type { PgOptions } from "@atproto/bsky/dist/data-plane/server/db/types";
+import type { PgOptions } from "@futuristick/atproto-bsky/dist/data-plane/server/db/types";
 import type { IdentityResolverOpts } from "@atproto/identity";
 import { FirehoseSubscriptionError, FirehoseWorkerError } from "./errors.ts";
 import type { WorkerInput, WorkerOutput } from "./worker.ts";
@@ -13,58 +11,41 @@ import type { WorkerInput, WorkerOutput } from "./worker.ts";
 let messagesReceived = 0,
 	messagesProcessed = 0;
 
-const DEFAULT_WORKER_URL = new URL("./worker.ts", import.meta.url);
+const DEFAULT_WORKER_URL = new URL("./defaultWorker.ts", import.meta.url);
 
-export class FirehoseSubscription {
+export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerOutput> {
 	private REDIS_SEQ_KEY = "bsky_indexer:seq";
 
 	protected firehose!: WebSocket;
-	protected pool: DynamicThreadPool<WorkerInput, WorkerOutput>;
 	protected redis?: ReturnType<typeof createClient>;
 
 	protected cursor = "";
 	protected logStatsInterval: number | null = null;
 	protected saveCursorInterval: number | null = null;
 
-	protected settings: FirehoseSubscriptionSettings = {
-		minWorkers: clamp(availableParallelism() / 2, 16, 32),
-		maxWorkers: clamp(availableParallelism() * 2, 32, 64),
-		maxConcurrency: 75,
-		statsFrequencyMs: 30_000,
-	};
+	protected settings: FirehoseSubscriptionSettings;
 
 	constructor(
-		protected opts: FirehoseSubscriptionOptions,
-		worker: URL | Blob = DEFAULT_WORKER_URL,
+		protected subOpts: FirehoseSubscriptionOptions,
+		worker: URL = DEFAULT_WORKER_URL,
 	) {
-		if (this.opts.minWorkers) this.settings.minWorkers = this.opts.minWorkers;
-		if (this.opts.maxWorkers) this.settings.maxWorkers = this.opts.maxWorkers;
-		if (this.opts.maxConcurrency) this.settings.maxConcurrency = this.opts.maxConcurrency;
-		if (this.opts.statsFrequencyMs !== undefined) {
-			this.settings.statsFrequencyMs = this.opts.statsFrequencyMs;
-		}
+		const settings: FirehoseSubscriptionSettings = {
+			minWorkers: subOpts.minWorkers ?? clamp(availableParallelism() / 2, 16, 32),
+			maxWorkers: subOpts.maxWorkers ?? clamp(availableParallelism() * 2, 32, 64),
+			maxConcurrency: subOpts.maxConcurrency ?? 75,
+			statsFrequencyMs: subOpts.statsFrequencyMs ?? 30_000,
+		};
 
-		const { dbOptions, idResolverOptions } = this.opts;
-		// hack to get options into the worker
-		const workerBlob = worker instanceof Blob ? worker : new Blob(
-			[
-				readFileSync(worker),
-				worker === DEFAULT_WORKER_URL
-					? `\nexport default new Worker(${JSON.stringify({ dbOptions, idResolverOptions })});`
-					: "",
-			],
-			{ type: "application/typescript" },
-		);
-
-		this.pool = new DynamicThreadPool(
-			this.settings.minWorkers,
-			this.settings.maxWorkers,
-			new URL(URL.createObjectURL(workerBlob)),
+		super(
+			settings.minWorkers,
+			settings.maxWorkers,
+			worker,
 			{
+				startWorkers: false,
 				enableTasksQueue: true,
 				workerChoiceStrategy: "INTERLEAVED_WEIGHTED_ROUND_ROBIN",
 				tasksQueueOptions: {
-					concurrency: this.settings.maxConcurrency,
+					concurrency: settings.maxConcurrency,
 					size: 1000,
 				},
 				workerOptions: {
@@ -76,12 +57,15 @@ export class FirehoseSubscription {
 			},
 		);
 
-		if (this.opts.redisOptions) {
-			this.redis = createClient(this.opts.redisOptions);
+		this.settings = settings;
+
+		if (this.subOpts.redisOptions) {
+			this.redis = createClient(this.subOpts.redisOptions);
 		}
 	}
 
-	async start(): Promise<void> {
+	override async start(): Promise<void> {
+		super.start();
 		if (this.redis && !this.redis.isOpen) await this.redis.connect();
 
 		const initialCursor = this.redis ? await this.redis.get(this.REDIS_SEQ_KEY) : null;
@@ -91,9 +75,9 @@ export class FirehoseSubscription {
 		} else if (initialCursor) {
 			console.log(`starting from redis cursor: ${initialCursor}`);
 			this.cursor = initialCursor;
-		} else if (this.opts.cursor) {
-			console.log(`starting from provided cursor: ${this.opts.cursor}`);
-			this.cursor = this.opts.cursor.toString();
+		} else if (this.subOpts.cursor) {
+			console.log(`starting from provided cursor: ${this.subOpts.cursor}`);
+			this.cursor = this.subOpts.cursor.toString();
 		} else console.log(`starting from latest`);
 
 		this.initFirehose();
@@ -110,7 +94,7 @@ export class FirehoseSubscription {
 						Math.round(
 							(messagesProcessed / messagesReceived) * 100,
 						)
-					}%) [${this.pool.info.workerNodes} workers; ${this.pool.info.queuedTasks} queued; ${this.pool.info.executingTasks} executing]`,
+					}%) [${this.info.workerNodes} workers; ${this.info.queuedTasks} queued; ${this.info.executingTasks} executing]`,
 				);
 				messagesReceived = messagesProcessed = 0;
 			}, this.settings.statsFrequencyMs);
@@ -125,22 +109,21 @@ export class FirehoseSubscription {
 
 	protected initFirehose(): void {
 		this.firehose = new WebSocket(
-			() => `${this.opts.service}/xrpc/com.atproto.sync.subscribeRepos?cursor=${this.cursor}`,
+			() => `${this.subOpts.service}/xrpc/com.atproto.sync.subscribeRepos?cursor=${this.cursor}`,
 		);
 		this.firehose.binaryType = "arraybuffer";
 		this.firehose.onmessage = this.onMessage;
-		this.firehose.onerror = (e) => this.opts.onError?.(new FirehoseSubscriptionError(e.error));
+		this.firehose.onerror = (e) => this.subOpts.onError?.(new FirehoseSubscriptionError(e.error));
 	}
 
 	protected onMessage = async (e: MessageEvent<ArrayBuffer>): Promise<void> => {
 		const chunk = new Uint8Array(e.data);
 		messagesReceived++;
 		try {
-			const res = await this.pool
-				.execute({ chunk }, undefined, [chunk.buffer]);
+			const res = await this.execute({ chunk }, undefined, [chunk.buffer]);
 			this.onProcessed(res);
 		} catch (e) {
-			this.opts.onError?.(new FirehoseSubscriptionError(e));
+			this.subOpts.onError?.(new FirehoseSubscriptionError(e));
 		}
 	};
 
@@ -148,16 +131,34 @@ export class FirehoseSubscription {
 		if (res?.success) {
 			messagesProcessed++;
 		} else if (res?.error) {
-			this.opts.onError?.(new FirehoseWorkerError(res.error));
+			this.subOpts.onError?.(new FirehoseWorkerError(res.error));
 		}
 		if (res?.cursor && !isNaN(res.cursor)) {
 			this.cursor = `${res.cursor}`;
 		}
 	};
 
-	async destroy(): Promise<void> {
+	// https://github.com/poolifier/poolifier-web-worker/blob/3d8a51cbec22da21ec6450346fd44c598e618572/src/pools/thread/fixed.ts#L61
+	protected override sendStartupMessageToWorker(workerNodeKey: number): void {
+		const workerNode = this.workerNodes[workerNodeKey];
+		const port2 = workerNode.messageChannel!.port2;
+		workerNode.worker.postMessage(
+			{
+				ready: false,
+				workerId: this.getWorkerInfo(workerNodeKey)?.id,
+				port: port2,
+				options: {
+					dbOptions: this.subOpts.dbOptions,
+					idResolverOptions: this.subOpts.idResolverOptions,
+				},
+			},
+			[port2],
+		);
+	}
+
+	override async destroy(): Promise<void> {
 		console.warn("destroying indexer");
-		await this?.pool?.destroy();
+		await super.destroy();
 		await this?.redis?.quit();
 	}
 }

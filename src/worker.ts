@@ -2,19 +2,20 @@ import { readCar as iterateCar } from "@atcute/car";
 import { decode, decodeFirst, fromBytes, toCidLink } from "@atcute/cbor";
 import type { ComAtprotoSyncSubscribeRepos } from "@atcute/atproto";
 import { CID } from "multiformats/cid";
-import { ThreadWorker } from "@poolifier/poolifier-web-worker";
-import { BackgroundQueue, Database } from "@atproto/bsky";
-import { IndexingService } from "@atproto/bsky/dist/data-plane/server/indexing/index.js";
+import { type MessageValue, ThreadWorker } from "@poolifier/poolifier-web-worker";
+import { BackgroundQueue, Database } from "@futuristick/atproto-bsky";
+import type { PgOptions } from "@futuristick/atproto-bsky/dist/data-plane/server/db/types";
+import type { IdentityResolverOpts } from "@atproto/identity";
 import { IdResolver, MemoryCache } from "@atproto/identity";
 import { BlobRef } from "@atproto/lexicon";
 import { WriteOpAction } from "@atproto/repo";
 import { AtUri } from "@atproto/syntax";
-import type { Event, FirehoseSubscriptionOptions, RepoOp } from "./subscription.ts";
+import type { Event, RepoOp } from "./subscription.ts";
+import { CustomIndexingService } from "./indexingService.ts";
 
-export type WorkerData = Pick<
-	FirehoseSubscriptionOptions,
-	"dbOptions" | "idResolverOptions"
->;
+export type WorkerStartupMessage = MessageEvent<MessageValue<WorkerInput>> & {
+	data: { options: { dbOptions: PgOptions; idResolverOptions: IdentityResolverOpts } };
+};
 
 export type WorkerInput = {
 	chunk: Uint8Array;
@@ -27,37 +28,16 @@ export type WorkerOutput = {
 };
 
 class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
-	db: Database;
-	idResolver: IdResolver;
-	background: BackgroundQueue;
-	indexingSvc: IndexingService;
+	db!: Database;
+	idResolver!: IdResolver;
+	background!: BackgroundQueue;
+	indexingSvc!: CustomIndexingService;
 
-	constructor(workerData: WorkerData) {
+	constructor() {
 		// must be async; poolifier uses that to determine whether to await
 		super(async (data: WorkerInput | undefined) => this.process(data!), {
 			maxInactiveTime: 60_000,
 		});
-
-		if (!workerData) {
-			throw new Error("must be run as a worker");
-		}
-
-		const { dbOptions, idResolverOptions } = workerData;
-		if (!dbOptions || !idResolverOptions) {
-			throw new Error("worker missing options");
-		}
-
-		this.db = new Database(dbOptions);
-		this.idResolver = new IdResolver({
-			...idResolverOptions,
-			didCache: new MemoryCache(),
-		});
-		this.background = new BackgroundQueue(this.db);
-		this.indexingSvc = new IndexingService(
-			this.db,
-			this.idResolver,
-			this.background,
-		);
 	}
 
 	process = async ({ chunk }: WorkerInput): Promise<WorkerOutput> => {
@@ -146,6 +126,49 @@ class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
 			return { success: true };
 		} catch (err) {
 			return { success: false, error: err };
+		}
+	}
+
+	protected override handleReadyMessageEvent(
+		messageEvent: WorkerStartupMessage,
+	): void {
+		if (!messageEvent.data?.options?.dbOptions || !messageEvent.data?.options?.idResolverOptions) {
+			throw new Error("worker missing options");
+		}
+
+		this.db = new Database(messageEvent.data.options.dbOptions);
+		this.idResolver = new IdResolver({
+			...messageEvent.data.options.idResolverOptions,
+			didCache: new MemoryCache(),
+		});
+		this.background = new BackgroundQueue(this.db);
+		this.indexingSvc = new CustomIndexingService(
+			this.db,
+			this.idResolver,
+			this.background,
+		);
+
+		if (
+			messageEvent.data?.workerId != null &&
+			messageEvent.data?.ready === false &&
+			messageEvent.data?.port != null
+		) {
+			try {
+				this.id = messageEvent.data.workerId;
+				// @ts-expect-error — port is private
+				this.port = messageEvent.data.port;
+				// @ts-expect-error — port is private
+				this.port.onmessage = this.messageEventListener.bind(this);
+				this.sendToMainWorker({
+					ready: true,
+					taskFunctionsProperties: this.listTaskFunctionsProperties(),
+				});
+			} catch {
+				this.sendToMainWorker({
+					ready: false,
+					taskFunctionsProperties: this.listTaskFunctionsProperties(),
+				});
+			}
 		}
 	}
 }

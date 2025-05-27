@@ -1,4 +1,4 @@
-import { FirehoseSubscription } from "./subscription.ts";
+import { FirehoseSubscription } from "../subscription.ts";
 import process from "node:process";
 
 const main = async (): Promise<void> => {
