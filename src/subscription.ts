@@ -95,7 +95,7 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 						Math.round(
 							(messagesProcessed / messagesReceived) * 100,
 						)
-					}%) [${this.info.workerNodes} workers; ${this.info.queuedTasks} queued; ${this.info.executingTasks} executing] {${this.cursor}]`,
+					}%) [${this.info.workerNodes} workers; ${this.info.queuedTasks} queued; ${this.info.executingTasks} executing] {${this.cursor}}`,
 				);
 				messagesReceived = messagesProcessed = 0;
 			}, this.settings.statsFrequencyMs);
