@@ -85,6 +85,7 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 		if (!this.logStatsInterval && this.settings.statsFrequencyMs) {
 			const secFreq = this.settings.statsFrequencyMs / 1000;
 			this.logStatsInterval = setInterval(() => {
+				if (messagesReceived === 0) return this.firehose.reconnect();
 				console.log(
 					`${Math.round(messagesProcessed / secFreq)} / ${
 						Math.round(
@@ -94,7 +95,7 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 						Math.round(
 							(messagesProcessed / messagesReceived) * 100,
 						)
-					}%) [${this.info.workerNodes} workers; ${this.info.queuedTasks} queued; ${this.info.executingTasks} executing]`,
+					}%) [${this.info.workerNodes} workers; ${this.info.queuedTasks} queued; ${this.info.executingTasks} executing] {${this.cursor}]`,
 				);
 				messagesReceived = messagesProcessed = 0;
 			}, this.settings.statsFrequencyMs);
@@ -102,7 +103,9 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 
 		if (this.redis && !this.saveCursorInterval) {
 			this.saveCursorInterval = setInterval(async () => {
-				await this.redis!.set(this.REDIS_SEQ_KEY, this.cursor);
+				if (messagesProcessed > 0 && messagesReceived > 0) {
+					await this.redis!.set(this.REDIS_SEQ_KEY, this.cursor);
+				}
 			}, 60_000);
 		}
 	}
