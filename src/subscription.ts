@@ -11,7 +11,7 @@ import type { WorkerInput, WorkerOutput } from "./worker.ts";
 let messagesReceived = 0,
 	messagesProcessed = 0;
 
-const DEFAULT_WORKER_URL = new URL("./defaultWorker.ts", import.meta.url);
+const DEFAULT_WORKER_URL = new URL("./bin/defaultWorker.ts", import.meta.url);
 
 export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerOutput> {
 	private REDIS_SEQ_KEY = "bsky_indexer:seq";
