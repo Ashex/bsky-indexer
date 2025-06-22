@@ -81,6 +81,16 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 		} else console.log(`starting from latest`);
 
 		this.initFirehose();
+		
+		if (this.redis) {
+			this.saveCursorInterval ??= setInterval( () => {
+				if (messagesProcessed > 0 && messagesReceived > 0) {
+					void this.redis!.set(this.REDIS_SEQ_KEY, this.cursor);
+				}
+			}, 55_000); // slightly offset from the 60s default log interval so the if condition isn't always false
+		} else {
+			console.warn("redis not configured, skipping cursor persistence");
+		}
 
 		if (!this.logStatsInterval && this.settings.statsFrequencyMs) {
 			const secFreq = this.settings.statsFrequencyMs / 1000;
@@ -99,14 +109,6 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 				);
 				messagesReceived = messagesProcessed = 0;
 			}, this.settings.statsFrequencyMs);
-		}
-
-		if (this.redis && !this.saveCursorInterval) {
-			this.saveCursorInterval = setInterval(async () => {
-				if (messagesProcessed > 0 && messagesReceived > 0) {
-					await this.redis!.set(this.REDIS_SEQ_KEY, this.cursor);
-				}
-			}, 60_000);
 		}
 	}
 
