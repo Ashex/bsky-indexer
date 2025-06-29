@@ -32,7 +32,7 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 		const settings: FirehoseSubscriptionSettings = {
 			minWorkers: subOpts.minWorkers ?? clamp(availableParallelism() / 2, 16, 32),
 			maxWorkers: subOpts.maxWorkers ?? clamp(availableParallelism() * 2, 32, 64),
-			maxConcurrency: subOpts.maxConcurrency ?? 75,
+			maxConcurrency: subOpts.maxConcurrency ?? 100,
 			statsFrequencyMs: subOpts.statsFrequencyMs ?? 30_000,
 		};
 
