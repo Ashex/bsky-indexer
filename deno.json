@@ -1,6 +1,6 @@
 {
 	"name": "@futur/bsky-indexer",
-	"version": "0.1.4",
+	"version": "0.1.5",
 	"license": "MPL-2.0",
 	"exports": "./src/index.ts",
 	"imports": {
@@ -11,7 +11,7 @@
 		"@atproto/lexicon": "npm:@atproto/lexicon@^0.4.11",
 		"@atproto/repo": "npm:@atproto/repo@^0.8.1",
 		"@atproto/syntax": "npm:@atproto/syntax@^0.4.0",
-		"@futuristick/atproto-bsky": "npm:@futuristick/atproto-bsky@^0.0.162",
+		"@futuristick/atproto-bsky": "npm:@futuristick/atproto-bsky@^0.0.169",
 		"@poolifier/poolifier-web-worker": "jsr:@poolifier/poolifier-web-worker@^0.4.31",
 		"@redis/client": "npm:@redis/client@^1.6.0",
 		"multiformats": "npm:multiformats@9.9.0",
