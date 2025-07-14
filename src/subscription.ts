@@ -81,9 +81,9 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 		} else console.log(`starting from latest`);
 
 		this.initFirehose();
-		
+
 		if (this.redis) {
-			this.saveCursorInterval ??= setInterval( () => {
+			this.saveCursorInterval ??= setInterval(() => {
 				if (messagesProcessed > 0 && messagesReceived > 0) {
 					void this.redis!.set(this.REDIS_SEQ_KEY, this.cursor);
 				}

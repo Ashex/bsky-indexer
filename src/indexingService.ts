@@ -4,7 +4,9 @@ import type { Database } from "@futuristick/atproto-bsky";
 import type { AtUri } from "@atproto/syntax";
 import { stringifyLex } from "@atproto/lexicon";
 import { WriteOpAction } from "@atproto/repo";
-import { type CID } from "multiformats/cid";
+import type { CID } from "multiformats/cid";
+
+const MAX_TIMESTAMP_DELTA = 1000 * 60 * 10; // 10 minutes
 
 export class CustomIndexingService extends IndexingService {
 	constructor(...params: ConstructorParameters<typeof IndexingService>) {
@@ -32,6 +34,11 @@ export class CustomIndexingService extends IndexingService {
 		timestamp: string,
 		opts?: { disableNotifs?: boolean; disableLabels?: boolean },
 	) {
+		const timeMs = new Date(timestamp).getTime();
+		const boundedTimestamp = !isNaN(timeMs) && Math.abs(timeMs - Date.now()) <= MAX_TIMESTAMP_DELTA
+			? timestamp // if the event time is within delta of current time, use it as indexedAt
+			: new Date().toISOString(); // otherwise, decide it ourselves
+
 		this.db.assertNotTransaction();
 		await this.db.transaction(async (txn) => {
 			const indexingTx = this.transact(txn);
@@ -39,9 +46,9 @@ export class CustomIndexingService extends IndexingService {
 			if (!indexer) return;
 
 			if (action === WriteOpAction.Create) {
-				await indexer.insertRecord(uri, cid, obj, timestamp, opts);
+				await indexer.insertRecord(uri, cid, obj, boundedTimestamp, opts);
 			} else {
-				await indexer.updateRecord(uri, cid, obj, timestamp);
+				await indexer.updateRecord(uri, cid, obj, boundedTimestamp);
 			}
 		});
 	}
