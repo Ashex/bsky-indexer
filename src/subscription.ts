@@ -75,7 +75,7 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 		} else if (initialCursor) {
 			console.log(`starting from redis cursor: ${initialCursor}`);
 			this.cursor = initialCursor;
-		} else if (this.subOpts.cursor) {
+		} else if (this.subOpts.cursor !== undefined) {
 			console.log(`starting from provided cursor: ${this.subOpts.cursor}`);
 			this.cursor = this.subOpts.cursor.toString();
 		} else console.log(`starting from latest`);
