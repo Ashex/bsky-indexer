@@ -3,7 +3,7 @@ import { URL } from "node:url";
 import { createClient, type RedisClientOptions } from "@redis/client";
 import { WebSocket } from "partysocket";
 import { DynamicThreadPool } from "@poolifier/poolifier-web-worker";
-import type { PgOptions } from "@futuristick/atproto-bsky/dist/data-plane/server/db/types";
+import type { PgOptions } from "@zeppelin-social/bsky/dist/data-plane/server/db/types";
 import type { IdentityResolverOpts } from "@atproto/identity";
 import { FirehoseSubscriptionError, FirehoseWorkerError } from "./errors.ts";
 import type { WorkerInput, WorkerOutput } from "./worker.ts";

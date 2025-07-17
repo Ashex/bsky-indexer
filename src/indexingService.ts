@@ -1,6 +1,6 @@
-import { IndexingService } from "@futuristick/atproto-bsky/dist/data-plane/server/indexing/index.js";
-import { RecordProcessor } from "@futuristick/atproto-bsky/dist/data-plane/server/indexing/processor.js";
-import type { Database } from "@futuristick/atproto-bsky";
+import { IndexingService } from "@zeppelin-social/bsky/dist/data-plane/server/indexing/index.js";
+import { RecordProcessor } from "@zeppelin-social/bsky/dist/data-plane/server/indexing/processor.js";
+import type { Database } from "@zeppelin-social/bsky";
 import type { AtUri } from "@atproto/syntax";
 import { stringifyLex } from "@atproto/lexicon";
 import { WriteOpAction } from "@atproto/repo";
