@@ -14,17 +14,29 @@ import type { Event, RepoOp } from "./subscription.ts";
 import { CustomIndexingService } from "./indexingService.ts";
 
 export type WorkerStartupMessage = MessageEvent<MessageValue<WorkerInput>> & {
-	data: { options: { dbOptions: PgOptions; idResolverOptions: IdentityResolverOpts } };
+	data: {
+		options: {
+			dbOptions: PgOptions;
+			idResolverOptions: IdentityResolverOpts;
+			maxTimestampDeltaMs?: number;
+		};
+	};
 };
 
 export type WorkerInput = {
 	chunk: Uint8Array;
+	receivedAt: number;
 };
 
 export type WorkerOutput = {
 	success?: boolean;
 	cursor?: number;
 	error?: unknown;
+	collection?: string;
+	timings?: {
+		queuedMs: number;
+		indexMs: number;
+	};
 };
 
 class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
@@ -40,36 +52,56 @@ class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
 		});
 	}
 
-	process = async ({ chunk }: WorkerInput): Promise<WorkerOutput> => {
+	process = async ({ chunk, receivedAt }: WorkerInput): Promise<WorkerOutput> => {
+		const queuedMs = Date.now() - receivedAt;
 		try {
 			const event = decodeChunk(chunk);
-			if (!event) return { success: true };
-			const { success, cursor, error } = await this.tryIndexEvent(event);
+			if (!event) return { success: true, timings: { queuedMs, indexMs: 0 } };
+
+			const indexStart = Date.now();
+			const { success, cursor, error } = await this.tryIndexEvent(
+				event,
+			);
+			const indexMs = Date.now() - indexStart;
+
+			const timings = {
+				queuedMs,
+				indexMs,
+			};
+			const collection = event.$type === "com.atproto.sync.subscribeRepos#commit" &&
+					event.ops?.[0]?.action === "create"
+				? event.ops?.[0]?.path?.split("/")[0]
+				: undefined;
+
 			if (success) {
-				return { success, cursor };
+				return { success, cursor, collection, timings };
 			} else {
-				return { success, error };
+				return { success, error, collection, timings };
 			}
 		} catch (err) {
-			return { success: false, error: err };
+			return { success: false, error: err, timings: { queuedMs, indexMs: 0 } };
 		}
 	};
 
 	async tryIndexEvent(
 		event: Event,
-	): Promise<{ success: boolean; cursor?: number; error?: unknown }> {
+	): Promise<
+		{
+			success: boolean;
+			cursor?: number;
+			error?: unknown;
+			avgIndexTime?: number;
+		}
+	> {
 		let attempt = 0;
 
 		let err: unknown;
 		while (attempt < 5) {
-			try {
-				// todo: some sort of did mutex across workers
-				await this.indexEvent(event);
-				return { success: true, cursor: event.seq };
-			} catch (e) {
-				attempt++;
-				err = e;
-			}
+			// todo: some sort of did mutex across workers
+			const { success, error } = await this.indexEvent(event);
+			if (success) return { success, cursor: event.seq, error };
+			attempt++;
+			err = error;
 		}
 
 		return {
@@ -78,7 +110,11 @@ class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
 		};
 	}
 
-	async indexEvent(event: Event): Promise<{ success: boolean; error?: unknown }> {
+	async indexEvent(
+		event: Event,
+	): Promise<
+		{ success: boolean; error?: unknown; avgIndexTime?: number }
+	> {
 		if (!event) return { success: true };
 
 		try {
@@ -101,27 +137,32 @@ class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
 					this.indexingSvc.indexHandle(event.did, event.time),
 				]);
 			} else if (event.$type === "com.atproto.sync.subscribeRepos#commit") {
+				this.background.add(() => this.indexingSvc.indexHandle(event.did, event.time));
+				this.background.add(() =>
+					this.indexingSvc.setCommitLastSeen(
+						event.did,
+						parseCid(event.commit),
+						event.rev,
+					)
+				);
+
 				for (const op of event.ops) {
 					const uri = AtUri.make(event.did, ...op.path.split("/"));
-					const indexFn = op.action === "delete"
-						? this.indexingSvc.deleteRecord(uri)
-						: this.indexingSvc.indexRecord(
+					if (op.action === "delete") {
+						await this.indexingSvc.deleteRecord(uri);
+					} else {
+						await this.indexingSvc.indexRecord(
 							uri,
 							parseCid(op.cid),
 							jsonToLex(op.record),
 							op.action === "create" ? WriteOpAction.Create : WriteOpAction.Update,
 							event.time,
 						);
-					this.background.add(() => this.indexingSvc.indexHandle(event.did, event.time));
-					await Promise.all([
-						indexFn,
-						this.indexingSvc.setCommitLastSeen(
-							event.did,
-							parseCid(event.commit),
-							event.rev,
-						),
-					]);
+					}
 				}
+				return {
+					success: true,
+				};
 			}
 			return { success: true };
 		} catch (err) {
@@ -146,6 +187,7 @@ class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
 			this.db,
 			this.idResolver,
 			this.background,
+			messageEvent.data?.options?.maxTimestampDeltaMs,
 		);
 
 		if (

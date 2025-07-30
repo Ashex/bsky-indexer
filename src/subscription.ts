@@ -6,7 +6,7 @@ import { DynamicThreadPool } from "@poolifier/poolifier-web-worker";
 import type { PgOptions } from "@zeppelin-social/bsky/dist/data-plane/server/db/types";
 import type { IdentityResolverOpts } from "@atproto/identity";
 import { FirehoseSubscriptionError, FirehoseWorkerError } from "./errors.ts";
-import type { WorkerInput, WorkerOutput } from "./worker.ts";
+import type { WorkerInput, WorkerOutput, WorkerStartupMessage } from "./worker.ts";
 
 let messagesReceived = 0,
 	messagesProcessed = 0;
@@ -23,6 +23,11 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 	protected logStatsInterval: number | null = null;
 	protected saveCursorInterval: number | null = null;
 
+	protected timings = {
+		queued: { total: 0, count: 0 },
+		index: { total: 0, count: 0 },
+	};
+
 	protected settings: FirehoseSubscriptionSettings;
 
 	constructor(
@@ -33,6 +38,7 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 			minWorkers: subOpts.minWorkers ?? clamp(availableParallelism() / 2, 16, 32),
 			maxWorkers: subOpts.maxWorkers ?? clamp(availableParallelism() * 2, 32, 64),
 			maxConcurrency: subOpts.maxConcurrency ?? 100,
+			maxTimestampDeltaMs: subOpts.maxTimestampDeltaMs,
 			statsFrequencyMs: subOpts.statsFrequencyMs ?? 30_000,
 		};
 
@@ -96,6 +102,10 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 			const secFreq = this.settings.statsFrequencyMs / 1000;
 			this.logStatsInterval = setInterval(() => {
 				if (messagesReceived === 0) return this.firehose.reconnect();
+				const timings = {
+					queued: this.timings.queued.total / this.timings.queued.count || 0,
+					index: this.timings.index.total / this.timings.index.count || 0,
+				};
 				console.log(
 					`${Math.round(messagesProcessed / secFreq)} / ${
 						Math.round(
@@ -105,9 +115,14 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 						Math.round(
 							(messagesProcessed / messagesReceived) * 100,
 						)
-					}%) [${this.info.workerNodes} workers; ${this.info.queuedTasks} queued; ${this.info.executingTasks} executing] {${this.cursor}}`,
+					}%) [${this.info.workerNodes} workers; ${this.info.queuedTasks} queued; ${this.info.executingTasks} executing] {${this.cursor}}
+avg timings (ms): queued=${timings.queued.toFixed(0)}, index=${timings.index.toFixed(0)}`,
 				);
 				messagesReceived = messagesProcessed = 0;
+				this.timings = {
+					queued: { total: 0, count: 0 },
+					index: { total: 0, count: 0 },
+				};
 			}, this.settings.statsFrequencyMs);
 		}
 	}
@@ -125,7 +140,7 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 		const chunk = new Uint8Array(e.data);
 		messagesReceived++;
 		try {
-			const res = await this.execute({ chunk }, undefined, [chunk.buffer]);
+			const res = await this.execute({ chunk, receivedAt: Date.now() }, undefined, [chunk.buffer]);
 			this.onProcessed(res);
 		} catch (e) {
 			this.subOpts.onError?.(new FirehoseSubscriptionError(e));
@@ -141,6 +156,12 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 		if (res?.cursor && !isNaN(res.cursor)) {
 			this.cursor = `${res.cursor}`;
 		}
+		if (res?.timings) {
+			this.timings.queued.total += res.timings.queuedMs;
+			this.timings.queued.count++;
+			this.timings.index.total += res.timings.indexMs;
+			this.timings.index.count++;
+		}
 	};
 
 	// https://github.com/poolifier/poolifier-web-worker/blob/3d8a51cbec22da21ec6450346fd44c598e618572/src/pools/thread/fixed.ts#L61
@@ -154,8 +175,9 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 				port: port2,
 				options: {
 					dbOptions: this.subOpts.dbOptions,
-					idResolverOptions: this.subOpts.idResolverOptions,
-				},
+					idResolverOptions: this.subOpts.idResolverOptions ?? {},
+					maxTimestampDeltaMs: this.subOpts.maxTimestampDeltaMs,
+				} satisfies WorkerStartupMessage["data"]["options"],
 			},
 			[port2],
 		);
@@ -172,6 +194,7 @@ export interface FirehoseSubscriptionSettings {
 	minWorkers: number;
 	maxWorkers: number;
 	maxConcurrency: number;
+	maxTimestampDeltaMs?: number;
 	statsFrequencyMs: number;
 }
 

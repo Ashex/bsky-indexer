@@ -24,6 +24,7 @@ const main = async (): Promise<void> => {
 		minWorkers: env.minWorkers,
 		maxWorkers: env.maxWorkers,
 		maxConcurrency: env.maxConcurrency,
+		maxTimestampDeltaMs: env.maxTimestampDeltaMs,
 		statsFrequencyMs: env.statsFrequencyMs,
 		onError: (err) => console.error(...(err.cause ? [err.message, err.cause] : [err])),
 	});
@@ -45,6 +46,9 @@ const getEnv = () => ({
 	maxWorkers: process.env.SUB_MAX_WORKERS ? parseInt(process.env.SUB_MAX_WORKERS) : undefined,
 	maxConcurrency: process.env.SUB_MAX_WORKER_CONCURRENCY
 		? parseInt(process.env.SUB_MAX_WORKER_CONCURRENCY)
+		: undefined,
+	maxTimestampDeltaMs: process.env.SUB_MAX_TIMESTAMP_DELTA_MS
+		? parseInt(process.env.SUB_MAX_TIMESTAMP_DELTA_MS)
 		: undefined,
 	statsFrequencyMs: process.env.STATS_FREQUENCY_MS
 		? parseInt(process.env.STATS_FREQUENCY_MS)

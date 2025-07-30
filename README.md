@@ -22,4 +22,6 @@ A service to ingest data from an atproto relay into the Bluesky AppView.
   between 32 and 64).
 - `SUB_MAX_WORKER_CONCURRENCY`: The maximum number of concurrent events to process per worker
   (default: 75).
+- `SUB_MAX_TIMESTAMP_DELTA_MS`: The maximum time delta between an event's stated time and the
+  observed indexing time to accept. (default: 1000 * 60 * 10 = 10 minutes).
 - `STATS_FREQUENCY_MS`: The frequency at which to log stats (default: 30_000 ms).

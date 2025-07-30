@@ -6,11 +6,19 @@ import { stringifyLex } from "@atproto/lexicon";
 import { WriteOpAction } from "@atproto/repo";
 import type { CID } from "multiformats/cid";
 
-const MAX_TIMESTAMP_DELTA = 1000 * 60 * 10; // 10 minutes
+const DEFAULT_TIMESTAMP_DELTA = 1000 * 60 * 10; // 10 minutes
 
 export class CustomIndexingService extends IndexingService {
-	constructor(...params: ConstructorParameters<typeof IndexingService>) {
-		super(...params);
+	protected maxTsDelta: number;
+
+	constructor(
+		...[db, idResolver, background, maxTsDelta = DEFAULT_TIMESTAMP_DELTA]: [
+			...ConstructorParameters<typeof IndexingService>,
+			number?,
+		]
+	) {
+		super(db, idResolver, background);
+		this.maxTsDelta = maxTsDelta;
 		this.records = Object.fromEntries(
 			Object.entries(this.records).map((
 				[key, value],
@@ -34,16 +42,17 @@ export class CustomIndexingService extends IndexingService {
 		timestamp: string,
 		opts?: { disableNotifs?: boolean; disableLabels?: boolean },
 	) {
+		if (!this.findIndexerForCollection(uri.collection)) return;
+
 		const timeMs = new Date(timestamp).getTime();
-		const boundedTimestamp = !isNaN(timeMs) && Math.abs(timeMs - Date.now()) <= MAX_TIMESTAMP_DELTA
+		const boundedTimestamp = !isNaN(timeMs) && Math.abs(timeMs - Date.now()) <= this.maxTsDelta
 			? timestamp // if the event time is within delta of current time, use it as indexedAt
 			: new Date().toISOString(); // otherwise, decide it ourselves
 
 		this.db.assertNotTransaction();
 		await this.db.transaction(async (txn) => {
 			const indexingTx = this.transact(txn);
-			const indexer = indexingTx.findIndexerForCollection(uri.collection);
-			if (!indexer) return;
+			const indexer = indexingTx.findIndexerForCollection(uri.collection)!;
 
 			if (action === WriteOpAction.Create) {
 				await indexer.insertRecord(uri, cid, obj, boundedTimestamp, opts);
@@ -52,10 +61,23 @@ export class CustomIndexingService extends IndexingService {
 			}
 		});
 	}
+
+	override async deleteRecord(uri: AtUri, cascading = false) {
+		if (!this.findIndexerForCollection(uri.collection)) return;
+		this.db.assertNotTransaction();
+		await this.db.transaction(async (txn) => {
+			const indexingTx = this.transact(txn);
+			const indexer = indexingTx.findIndexerForCollection(uri.collection)!;
+			await indexer.deleteRecord(uri, cascading);
+		});
+	}
 }
 
 export class CustomRecordProcessor<S, T> extends RecordProcessor<S, T> {
 	static fromProcessor<S, T>(processor: RecordProcessor<S, T>): CustomRecordProcessor<S, T> {
+		// disk doesn't like lots of concurrent attempts to lock *_agg
+		// @ts-expect-error — private property
+		processor.background.queue.concurrency = 15;
 		// @ts-expect-error — private properties
 		return new CustomRecordProcessor(processor.appDb, processor.background, processor.params);
 	}
@@ -115,6 +137,17 @@ export class CustomRecordProcessor<S, T> extends RecordProcessor<S, T> {
 					.onConflict((oc) => oc.doNothing())
 					.execute();
 			}
+		});
+	}
+
+	override aggregateOnCommit(indexed: T) {
+		// @ts-expect-error — private property
+		const { updateAggregates } = this.params;
+		if (!updateAggregates) return;
+		// @ts-expect-error — private property
+		this.appDb.onCommit(() => {
+			// @ts-expect-error — private property
+			this.background.add((db) => updateAggregates(db.db, indexed));
 		});
 	}
 }
