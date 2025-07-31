@@ -13,6 +13,9 @@ import { AtUri } from "@atproto/syntax";
 import type { Event, RepoOp } from "./subscription.ts";
 import { CustomIndexingService } from "./indexingService.ts";
 
+// If indexing an event takes longer than this, we should clear the background queue before continuing
+const MAX_INDEX_TIME_MS = 3000;
+
 export type WorkerStartupMessage = MessageEvent<MessageValue<WorkerInput>> & {
 	data: {
 		options: {
@@ -63,6 +66,10 @@ class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
 				event,
 			);
 			const indexMs = Date.now() - indexStart;
+
+			if (indexMs > MAX_INDEX_TIME_MS) {
+				await this.background.processAll();
+			}
 
 			const timings = {
 				queuedMs,

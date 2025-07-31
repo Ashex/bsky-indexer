@@ -77,7 +77,7 @@ export class CustomRecordProcessor<S, T> extends RecordProcessor<S, T> {
 	static fromProcessor<S, T>(processor: RecordProcessor<S, T>): CustomRecordProcessor<S, T> {
 		// disk doesn't like lots of concurrent attempts to lock *_agg
 		// @ts-expect-error — private property
-		processor.background.queue.concurrency = 15;
+		processor.background.queue.concurrency = 20;
 		// @ts-expect-error — private properties
 		return new CustomRecordProcessor(processor.appDb, processor.background, processor.params);
 	}
