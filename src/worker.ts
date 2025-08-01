@@ -14,7 +14,7 @@ import type { Event, RepoOp } from "./subscription.ts";
 import { CustomIndexingService } from "./indexingService.ts";
 
 // If indexing an event takes longer than this, we should clear the background queue before continuing
-const MAX_INDEX_TIME_MS = 5000;
+const MAX_INDEX_TIME_MS = 3000;
 
 export type WorkerStartupMessage = MessageEvent<MessageValue<WorkerInput>> & {
 	data: {
@@ -84,7 +84,8 @@ class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
 				return { success, error, collection, timings };
 			}
 		} catch (err) {
-			return { success: false, error: err, timings: { queuedMs, indexMs: 0 } };
+			const error = err instanceof Error ? err.message : `${err}`;
+			return { success: false, error, timings: { queuedMs, indexMs: 0 } };
 		}
 	};
 
@@ -143,8 +144,8 @@ class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
 				};
 			}
 			return { success: true };
-		} catch (err) {
-			return { success: false, error: err };
+		} catch (error) {
+			return { success: false, error };
 		}
 	}
 
