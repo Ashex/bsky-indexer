@@ -107,7 +107,7 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 					console.warn(
 						`queue size ${this.info.queuedTasks} exceeded max size, reconnecting in 30s`,
 					);
-					this.firehose.close(0, "backpressure");
+					this.firehose.close();
 					this.firehose.onmessage = null;
 					setTimeout(() => this.initFirehose(this.cursor), 30_000);
 					return;
