@@ -54,7 +54,7 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 				workerChoiceStrategy: "INTERLEAVED_WEIGHTED_ROUND_ROBIN",
 				tasksQueueOptions: {
 					concurrency: settings.maxConcurrency,
-					size: 1000,
+					size: settings.maxConcurrency * 10,
 				},
 				workerOptions: {
 					type: "module",
@@ -103,16 +103,15 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 		if (!this.logStatsInterval && this.settings.statsFrequencyMs) {
 			const secFreq = this.settings.statsFrequencyMs / 1000;
 			this.logStatsInterval = setInterval(() => {
-				if (messagesReceived === 0) return this.firehose.reconnect();
-
 				if (this.info.queuedTasks && this.info.queuedTasks > MAX_ACCEPTABLE_QUEUE_SIZE) {
 					console.warn(
 						`queue size ${this.info.queuedTasks} exceeded max size, reconnecting in 30s`,
 					);
-					this.firehose.close();
+					this.firehose.close(0, "backpressure");
+					this.firehose.onmessage = null;
 					setTimeout(() => this.initFirehose(this.cursor), 30_000);
 					return;
-				}
+				} else if (messagesReceived === 0) return this.firehose.reconnect();
 
 				const timings = {
 					queued: this.timings.queued.total / this.timings.queued.count || 0,

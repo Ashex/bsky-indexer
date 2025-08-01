@@ -14,7 +14,7 @@ import type { Event, RepoOp } from "./subscription.ts";
 import { CustomIndexingService } from "./indexingService.ts";
 
 // If indexing an event takes longer than this, we should clear the background queue before continuing
-const MAX_INDEX_TIME_MS = 3000;
+const MAX_INDEX_TIME_MS = 5000;
 
 export type WorkerStartupMessage = MessageEvent<MessageValue<WorkerInput>> & {
 	data: {
