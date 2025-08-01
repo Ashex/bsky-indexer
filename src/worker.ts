@@ -62,9 +62,7 @@ class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
 			if (!event) return { success: true, timings: { queuedMs, indexMs: 0 } };
 
 			const indexStart = Date.now();
-			const { success, cursor, error } = await this.tryIndexEvent(
-				event,
-			);
+			const { success, error } = await this.indexEvent(event);
 			const indexMs = Date.now() - indexStart;
 
 			if (indexMs > MAX_INDEX_TIME_MS) {
@@ -81,7 +79,7 @@ class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
 				: undefined;
 
 			if (success) {
-				return { success, cursor, collection, timings };
+				return { success, cursor: event.seq, collection, timings };
 			} else {
 				return { success, error, collection, timings };
 			}
@@ -89,33 +87,6 @@ class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
 			return { success: false, error: err, timings: { queuedMs, indexMs: 0 } };
 		}
 	};
-
-	async tryIndexEvent(
-		event: Event,
-	): Promise<
-		{
-			success: boolean;
-			cursor?: number;
-			error?: unknown;
-			avgIndexTime?: number;
-		}
-	> {
-		let attempt = 0;
-
-		let err: unknown;
-		while (attempt < 5) {
-			// todo: some sort of did mutex across workers
-			const { success, error } = await this.indexEvent(event);
-			if (success) return { success, cursor: event.seq, error };
-			attempt++;
-			err = error;
-		}
-
-		return {
-			success: false,
-			error: `max attempts reached for ${event.did} ${event.seq}\n${err}`,
-		};
-	}
 
 	async indexEvent(
 		event: Event,

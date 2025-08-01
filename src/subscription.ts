@@ -106,7 +106,9 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 				if (messagesReceived === 0) return this.firehose.reconnect();
 
 				if (this.info.queuedTasks && this.info.queuedTasks > MAX_ACCEPTABLE_QUEUE_SIZE) {
-					console.warn(`queue size ${this.info.queuedTasks} exceeded max size, reconnecting in 30s`);
+					console.warn(
+						`queue size ${this.info.queuedTasks} exceeded max size, reconnecting in 30s`,
+					);
 					this.firehose.close();
 					setTimeout(() => this.initFirehose(this.cursor), 30_000);
 					return;
@@ -141,7 +143,10 @@ avg timings (ms): queued=${timings.queued.toFixed(0)}, index=${timings.index.toF
 
 	protected initFirehose(cursor?: string): void {
 		this.firehose = new WebSocket(
-			() => `${this.subOpts.service}/xrpc/com.atproto.sync.subscribeRepos?cursor=${cursor ?? this.cursor}`,
+			() =>
+				`${this.subOpts.service}/xrpc/com.atproto.sync.subscribeRepos?cursor=${
+					cursor ?? this.cursor
+				}`,
 		);
 		this.firehose.binaryType = "arraybuffer";
 		this.firehose.onmessage = this.onMessage;
