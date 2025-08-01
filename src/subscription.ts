@@ -18,7 +18,7 @@ const DEFAULT_WORKER_URL = new URL("./bin/defaultWorker.ts", import.meta.url);
 export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerOutput> {
 	private REDIS_SEQ_KEY = "bsky_indexer:seq";
 
-	protected firehose!: WebSocket;
+	protected firehose?: WebSocket;
 	protected redis?: ReturnType<typeof createClient>;
 
 	protected cursor = "";
@@ -103,13 +103,21 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 		if (!this.logStatsInterval && this.settings.statsFrequencyMs) {
 			const secFreq = this.settings.statsFrequencyMs / 1000;
 			this.logStatsInterval = setInterval(() => {
-				if (this.info.queuedTasks && this.info.queuedTasks > MAX_ACCEPTABLE_QUEUE_SIZE) {
+				if (
+					this.info.queuedTasks && this.info.queuedTasks > MAX_ACCEPTABLE_QUEUE_SIZE &&
+					this.firehose
+				) {
 					console.warn(
-						`queue size ${this.info.queuedTasks} exceeded max size, reconnecting in 30s`,
+						`queue size ${this.info.queuedTasks} exceeded max size, reconnecting in ${secFreq}s`,
 					);
 					this.firehose.close();
 					this.firehose.onmessage = null;
-					setTimeout(() => this.initFirehose(this.cursor), 30_000);
+					delete this.firehose;
+					return;
+				} else if (!this.firehose) {
+					if (this.info.queuedTasks && this.info.queuedTasks < MAX_ACCEPTABLE_QUEUE_SIZE) {
+						this.initFirehose(this.cursor);
+					}
 					return;
 				} else if (messagesReceived === 0) return this.firehose.reconnect();
 
