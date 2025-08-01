@@ -117,28 +117,30 @@ class Worker extends ThreadWorker<WorkerInput, WorkerOutput> {
 				]);
 			} else if (event.$type === "com.atproto.sync.subscribeRepos#commit") {
 				this.background.add(() => this.indexingSvc.indexHandle(event.did, event.time));
-				this.background.add(() =>
+
+				await Promise.all([
 					this.indexingSvc.setCommitLastSeen(
 						event.did,
 						parseCid(event.commit),
 						event.rev,
-					)
-				);
-
-				for (const op of event.ops) {
-					const uri = AtUri.make(event.did, ...op.path.split("/"));
-					if (op.action === "delete") {
-						await this.indexingSvc.deleteRecord(uri);
-					} else {
-						await this.indexingSvc.indexRecord(
-							uri,
-							parseCid(op.cid),
-							jsonToLex(op.record),
-							op.action === "create" ? WriteOpAction.Create : WriteOpAction.Update,
-							event.time,
-						);
-					}
-				}
+					),
+					(async () => {
+						for (const op of event.ops) {
+							const uri = AtUri.make(event.did, ...op.path.split("/"));
+							if (op.action === "delete") {
+								await this.indexingSvc.deleteRecord(uri);
+							} else {
+								await this.indexingSvc.indexRecord(
+									uri,
+									parseCid(op.cid),
+									jsonToLex(op.record),
+									op.action === "create" ? WriteOpAction.Create : WriteOpAction.Update,
+									event.time,
+								);
+							}
+						}
+					})(),
+				]);
 				return {
 					success: true,
 				};
