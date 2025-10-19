@@ -14,7 +14,7 @@ let messagesReceived = 0,
 const DEFAULT_WORKER_URL = new URL("./bin/defaultWorker.ts", import.meta.url);
 
 export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerOutput> {
-	private REDIS_SEQ_KEY = "bsky_indexer:seq";
+	private REDIS_SEQ_KEY: string;
 
 	protected firehose!: WebSocket;
 	protected redis?: ReturnType<typeof createClient>;
@@ -63,6 +63,8 @@ export class FirehoseSubscription extends DynamicThreadPool<WorkerInput, WorkerO
 			},
 		);
 
+		// Allow custom Redis key for cursor tracking
+		this.REDIS_SEQ_KEY = subOpts.redisSeqKey || "bsky_indexer:seq";
 		this.settings = settings;
 
 		if (this.subOpts.redisOptions) {
@@ -131,6 +133,8 @@ avg timings (ms): queued=${timings.queued.toFixed(0)}, index=${timings.index.toF
 	}
 
 	protected initFirehose(cursor?: string): void {
+		console.log(`[Firehose] Initializing WebSocket connection with cursor: ${cursor ?? this.cursor}`);
+
 		this.firehose = new WebSocket(
 			() =>
 				`${this.subOpts.service}/xrpc/com.atproto.sync.subscribeRepos?cursor=${
@@ -138,17 +142,55 @@ avg timings (ms): queued=${timings.queued.toFixed(0)}, index=${timings.index.toF
 				}`,
 		);
 		this.firehose.binaryType = "arraybuffer";
+		this.firehose.onopen = () => {
+        console.log(`[Firehose] WebSocket connection opened successfully`);
+    };
 		this.firehose.onmessage = this.onMessage;
-		this.firehose.onerror = (e) => this.subOpts.onError?.(new FirehoseSubscriptionError(e.error));
+		this.firehose.onerror = (e) => {
+			console.error(`[Firehose] WebSocket error:`, {
+            error: e.error,
+            type: e.type,
+            cursor: this.cursor,
+            timestamp: new Date().toISOString(),
+        });
+			this.subOpts.onError?.(new FirehoseSubscriptionError(e.error));
+			console.log("WebSocket error, reconnecting...");
+			setTimeout(() => this.firehose.reconnect(), 1000);
+		}
+		this.firehose.onclose = (e) => {
+			console.warn(`[Firehose] WebSocket closed:`, {
+            code: e.code,
+            reason: e.reason,
+            wasClean: e.wasClean,
+            cursor: this.cursor,
+            timestamp: new Date().toISOString(),
+        });
+			setTimeout(() => this.firehose.reconnect(), 1000);
+		};
 	}
 
 	protected onMessage = async (e: MessageEvent<ArrayBuffer>): Promise<void> => {
 		const chunk = new Uint8Array(e.data);
 		messagesReceived++;
+
+		console.debug(`[Firehose] Message received: size=${chunk.byteLength}B, total=${messagesReceived}`);
+
 		try {
+			const startTime = Date.now();
 			const res = await this.execute({ chunk, receivedAt: Date.now() }, undefined, [chunk.buffer]);
+			const duration = Date.now() - startTime;
+        
+        if (duration > 1000) {
+            console.warn(`[Firehose] Slow message processing: ${duration}ms`);
+        }
+			
 			this.onProcessed(res);
 		} catch (e) {
+			console.error(`[Firehose] Error processing message:`, {
+            error: e,
+            messageSize: chunk.byteLength,
+            cursor: this.cursor,
+        });
 			this.subOpts.onError?.(new FirehoseSubscriptionError(e));
 		}
 	};
@@ -157,10 +199,13 @@ avg timings (ms): queued=${timings.queued.toFixed(0)}, index=${timings.index.toF
 		if (res?.success) {
 			messagesProcessed++;
 		} else if (res?.error) {
+			console.error(`[Worker] Processing error:`, res.error);
 			this.subOpts.onError?.(new FirehoseWorkerError(res.error));
 		}
 		if (res?.cursor && !isNaN(res.cursor)) {
+			const oldCursor = this.cursor;
 			this.cursor = `${res.cursor}`;
+			console.debug(`[Cursor] Updated: ${oldCursor} -> ${this.cursor}`);
 		}
 		if (res?.timings) {
 			this.timings.queued.total += res.timings.queuedMs;
@@ -183,6 +228,7 @@ avg timings (ms): queued=${timings.queued.toFixed(0)}, index=${timings.index.toF
 					dbOptions: this.subOpts.dbOptions,
 					idResolverOptions: this.subOpts.idResolverOptions ?? {},
 					maxTimestampDeltaMs: this.subOpts.maxTimestampDeltaMs,
+					feedgenAutoDiscovery: this.subOpts.feedgenAutoDiscovery,
 				} satisfies WorkerStartupMessage["data"]["options"],
 			},
 			[port2],
@@ -208,9 +254,11 @@ export interface FirehoseSubscriptionOptions extends Partial<FirehoseSubscriptio
 	service: string;
 	dbOptions: PgOptions;
 	redisOptions?: RedisClientOptions;
+	redisSeqKey?: string;
 	idResolverOptions?: IdentityResolverOpts;
 	onError?: (err: Error) => void;
 	cursor?: number;
+	feedgenAutoDiscovery?: boolean;
 }
 
 export type RepoOp =

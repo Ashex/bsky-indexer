@@ -42,6 +42,11 @@ export class CustomIndexingService extends IndexingService {
 		timestamp: string,
 		opts?: { disableNotifs?: boolean; disableLabels?: boolean },
 	) {
+		const indexer = this.findIndexerForCollection(uri.collection);
+    if (!indexer) {
+        console.warn(`[Index] No indexer found for collection: ${uri.collection}`);
+        return;
+    }
 		if (!this.findIndexerForCollection(uri.collection)) return;
 
 		const timeMs = new Date(timestamp).getTime();
@@ -49,17 +54,24 @@ export class CustomIndexingService extends IndexingService {
 			? timestamp // if the event time is within delta of current time, use it as indexedAt
 			: new Date().toISOString(); // otherwise, decide it ourselves
 
-		this.db.assertNotTransaction();
-		await this.db.transaction(async (txn) => {
-			const indexingTx = this.transact(txn);
-			const indexer = indexingTx.findIndexerForCollection(uri.collection)!;
+		console.debug(`[Index] Processing ${action} for ${uri.toString()}`);
 
-			if (action === WriteOpAction.Create) {
-				await indexer.insertRecord(uri, cid, obj, boundedTimestamp, opts);
-			} else {
-				await indexer.updateRecord(uri, cid, obj, boundedTimestamp);
-			}
+		this.db.assertNotTransaction();
+		try {
+		await this.db.transaction(async (txn) => {
+				const indexingTx = this.transact(txn);
+				const indexer = indexingTx.findIndexerForCollection(uri.collection)!;
+
+				if (action === WriteOpAction.Create) {
+						await indexer.insertRecord(uri, cid, obj, boundedTimestamp, opts);
+				} else {
+						await indexer.updateRecord(uri, cid, obj, boundedTimestamp);
+				}
 		});
+    } catch (e) {
+        console.error(`[Index] Failed to index ${uri.toString()}:`, e);
+        throw e;
+    }
 	}
 
 	override async deleteRecord(uri: AtUri, cascading = false) {
